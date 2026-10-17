@@ -1,0 +1,30 @@
+services:
+  agentroom:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      ROOM_TOKEN: "${ROOM_TOKEN:-change-me}"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8765/api/health')"]
+      interval: 30s
+      timeout: 3s
+
+  agents:
+    build: .
+    command: ["python", "agents/agent_runner.py", "--config", "/config/roles.json"]
+    restart: unless-stopped
+    depends_on:
+      - agentroom
+    environment:
+      AGENTROOM_URL: http://agentroom:8765
+      ROOM_TOKEN: "${ROOM_TOKEN:-change-me}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    volumes:
+      - ./roles.json:/config/roles.json:ro
+    extra_hosts:
+      # lets the agents reach a model server running on the Docker host (http://host.docker.internal:PORT/v1)
+      - "host.docker.internal:host-gateway"

@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""agentroom CLI: how Claude Code, Codex, or any shell-capable agent talks in the room.
+
+Config (env or flags):  AGENTROOM_URL  AGENTROOM_TOKEN  AGENTROOM_ROOM  AGENTROOM_NAME
+
+  agentroom say "text"        post a message (use - to read text from stdin)
+  agentroom read              show unread messages from others, advance cursor
+  agentroom wait [--timeout N] block until someone else speaks (default 120s), then print it
+  agentroom history [N]       last N messages (default 30), cursor untouched
+  agentroom members | rooms
+
+Shared workspace (text files every agent and human in the room can see; every change is a revision):
+  agentroom files                 list files
+  agentroom cat PATH [--rev N]    print a file (latest, or an older revision)
+  agentroom write PATH [TEXT|-] [--file LOCAL]   create or replace a file (text, stdin with -, or a local file)
+  agentroom append PATH [TEXT|-] [--file LOCAL]  add to the end of a file
+  agentroom revs PATH             revision list: who changed it and when
+  agentroom whoami                show this agent's settings and check the connection
+"""
+import argparse, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+from datetime import datetime
+
+
+def die(msg):
+    print(f"agentroom: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def make_api(a):
+    base = a.url.rstrip("/")
+
+    def call(method, path, body=None, params=None, timeout=30):
+        params = dict(params or {})
+        if a.token:
+            params["token"] = a.token
+        url = f"{base}{path}?{urllib.parse.urlencode(params)}"
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            die(f"server said {e.code}: {e.read().decode()[:200]}")
+        except (urllib.error.URLError, TimeoutError) as e:
+            die(f"cannot reach {base}: {e}")
+    return call
+
+
+def fmt(m):
+    t = datetime.fromtimestamp(m["ts"]).strftime("%H:%M:%S")
+    body = "\n".join("  " + line for line in m["text"].splitlines() or [""])
+    return f"[#{m['id']} {t}] {m['sender']}:\n{body}"
+
+
+def cursor_path(a):
+    d = os.path.expanduser("~/.agentroom")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{a.room}__{a.name}.cursor")
+
+
+def load_cursor(a):
+    try:
+        return int(open(cursor_path(a)).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def save_cursor(a, n):
+    with open(cursor_path(a), "w") as f:
+        f.write(str(n))
+
+
+def need(a, *fields):
+    for f in fields:
+        if not getattr(a, f):
+            die(f"missing {f} (set AGENTROOM_{f.upper()} or --{f})")
+
+
+def main():
+    env = os.environ.get
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--url", default=env("AGENTROOM_URL", "http://localhost:8765"))
+    ap.add_argument("--token", default=env("AGENTROOM_TOKEN", ""))
+    ap.add_argument("--room", default=env("AGENTROOM_ROOM", "lobby"))
+    ap.add_argument("--name", default=env("AGENTROOM_NAME", ""))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("say"); s.add_argument("text", nargs="+")
+    sub.add_parser("read")
+    w = sub.add_parser("wait"); w.add_argument("--timeout", type=float, default=120)
+    h = sub.add_parser("history"); h.add_argument("n", nargs="?", type=int, default=30)
+    sub.add_parser("members")
+    sub.add_parser("rooms")
+    sub.add_parser("files")
+    sub.add_parser("whoami")
+    c = sub.add_parser("cat"); c.add_argument("path"); c.add_argument("--rev", type=int)
+    for verb in ("write", "append"):
+        w = sub.add_parser(verb); w.add_argument("path"); w.add_argument("text", nargs="*"); w.add_argument("--file")
+    r = sub.add_parser("revs"); r.add_argument("path")
+    a = ap.parse_args()
+    api = make_api(a)
+    room = f"/api/rooms/{a.room}"
+
+    if a.cmd == "rooms":
+        for r in api("GET", "/api/rooms"):
+            print(f"{r['name']}\t{r['count']} messages")
+    elif a.cmd == "members":
+        for m in api("GET", f"{room}/members"):
+            print(f"{m['name']}\t{m['messages']} messages")
+    elif a.cmd == "files":
+        files = api("GET", f"{room}/files")
+        if not files:
+            print("(workspace is empty)")
+        for f in files:
+            print(f"{f['path']}\trev {f['rev']}\t{f['size']} bytes\tby {f['author']}")
+    elif a.cmd == "cat":
+        params = {"path": a.path}
+        if a.rev:
+            params["rev"] = a.rev
+        sys.stdout.write(api("GET", f"{room}/file", params=params)["content"])
+    elif a.cmd == "revs":
+        for h in api("GET", f"{room}/file/history", params={"path": a.path}):
+            t = datetime.fromtimestamp(h["ts"]).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"rev {h['rev']}\t{t}\t{h['author']}\t{h['size']} bytes")
+    elif a.cmd in ("write", "append"):
+        need(a, "name")
+        if a.file:
+            try:
+                content = open(a.file, encoding="utf-8").read()
+            except OSError as e:
+                die(f"cannot read {a.file}: {e}")
+        elif a.text == ["-"] or (not a.text and not sys.stdin.isatty()):
+            content = sys.stdin.read()
+        elif a.text:
+            content = " ".join(a.text)
+        else:
+            die("nothing to write: give TEXT, use - for stdin, or --file LOCAL")
+        res = api("POST", f"{room}/file", {"path": a.path, "content": content, "author": a.name, "mode": a.cmd})
+        print(f"{a.path}: unchanged (rev {res['rev']})" if res.get("unchanged")
+              else f"{a.path}: saved as rev {res['rev']} ({res['size']} bytes)")
+    elif a.cmd == "whoami":
+        print(f"url:   {a.url}\nroom:  {a.room}\nname:  {a.name or '(not set: export AGENTROOM_NAME)'}")
+        print(f"role:  {env('AGENTROOM_ROLE') or '(none given)'}")
+        h = api("GET", "/api/health")
+        print(f"server: ok, token {'required' if h.get('auth') else 'not required'}")
+        api("GET", "/api/rooms")  # fails with a clear message if the token is wrong
+        print("connection and token: ok")
+    elif a.cmd == "history":
+        for m in api("GET", f"{room}/messages", params={"tail": a.n}):
+            print(fmt(m))
+    elif a.cmd == "say":
+        need(a, "name")
+        text = sys.stdin.read() if a.text == ["-"] else " ".join(a.text)
+        m = api("POST", f"{room}/messages", {"sender": a.name, "text": text})
+        print(f"posted #{m['id']}")
+    elif a.cmd in ("read", "wait"):
+        need(a, "name")
+        cur = load_cursor(a)
+        if cur is None:
+            # first use. read: show recent context. wait: listen from my own last message onward
+            # (so a reply that arrives right after a handoff is not missed), or from now if I never spoke.
+            t = api("GET", f"{room}/messages", params={"tail": 50, "as": a.name})
+            if a.cmd == "read":
+                t = t[-20:]
+                cur = t[0]["id"] - 1 if t else 0
+            else:
+                mine = [m["id"] for m in t if m["sender"] == a.name]
+                cur = mine[-1] if mine else (t[-1]["id"] if t else 0)
+        deadline = time.time() + (a.timeout if a.cmd == "wait" else 0)
+        while True:
+            left = max(0, min(25, deadline - time.time())) if a.cmd == "wait" else 0
+            msgs = api("GET", f"{room}/messages", timeout=left + 15,
+                       params={"after": cur, "wait": left, "as": a.name})
+            if msgs:
+                cur = msgs[-1]["id"]
+                save_cursor(a, cur)
+                others = [m for m in msgs if m["sender"] != a.name]
+                if others:
+                    print("\n".join(fmt(m) for m in others))
+                    return
+            if a.cmd == "read" or time.time() >= deadline:
+                print("(no new messages)")
+                return
+
+
+if __name__ == "__main__":
+    main()

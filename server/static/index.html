@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentroom</title>
+<style>
+  :root {
+    --bg: #edf0f3; --surface: #ffffff; --ink: #17212b; --muted: #66717d; --rule: #d3d9df;
+    --accent: #0f6e8c; --accent-soft: #dcecf2; --code: #f2f4f6; --warn: #a8442b;
+    --sans: "Avenir Next", "Segoe UI", "Hiragino Sans", "PingFang SC", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131a21; --surface: #1a232c; --ink: #e4e9ee; --muted: #8d99a6; --rule: #2d3945;
+            --accent: #5bb6d4; --accent-soft: #1f3541; --code: #222d38; --warn: #e0866c; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); display: grid;
+         grid-template-columns: 15rem 1fr; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  aside { border-right: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column;
+          min-height: 0; overflow: hidden; }
+  aside h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 16px 6px; }
+  .brand { padding: 16px 16px 4px; font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+  .list { overflow: auto; padding: 0 8px; }
+  .room { display: flex; justify-content: space-between; width: 100%; text-align: left; border: 0; background: none;
+          padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+  .room:hover { background: var(--bg); }
+  .room[aria-current="true"] { background: var(--accent-soft); font-weight: 600; }
+  .room small { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .newroom { display: flex; gap: 6px; padding: 8px 16px 0; }
+  .newroom input { flex: 1; min-width: 0; border: 1px solid var(--rule); border-radius: 6px; padding: 5px 8px;
+                   background: var(--bg); }
+  .member { display: flex; align-items: center; gap: 8px; padding: 4px 16px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--rule); flex: none; }
+  .dot.live { background: #2f9e62; border-color: #2f9e62; }
+  .dot.recent { border-color: #2f9e62; }
+  .member span.n { font-weight: 600; }
+  .member small { color: var(--muted); margin-left: auto; }
+
+  main { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; height: 100vh; height: 100dvh; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 14px 22px; border-bottom: 1px solid var(--rule);
+           background: var(--surface); }
+  header h1 { font-size: 17px; margin: 0; }
+  #state { margin-left: auto; color: var(--muted); font-size: 13px; }
+  #state.bad { color: var(--warn); }
+  #menu { display: none; border: 1px solid var(--rule); background: none; border-radius: 6px; padding: 3px 9px; }
+
+  #log { overflow: auto; padding: 10px 22px 24px; position: relative; scroll-behavior: auto; }
+  .msg { display: grid; grid-template-columns: 8.5rem 1fr; column-gap: 16px; padding: 3px 0; }
+  .msg.first { padding-top: 14px; }
+  .who { text-align: right; font-weight: 650; overflow-wrap: anywhere; }
+  .who time { display: block; font-weight: 400; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .body { border-left: 3px solid var(--c, var(--rule)); padding-left: 14px; white-space: pre-wrap; overflow-wrap: anywhere;
+          min-width: 0; }
+  .body pre { margin: 6px 0; padding: 10px 12px; background: var(--code); border-radius: 6px; overflow-x: auto;
+              font: 13px/1.5 var(--mono); white-space: pre; }
+  .body code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: 0.9em var(--mono); }
+  .at { color: var(--accent); font-weight: 600; }
+  .empty { color: var(--muted); padding: 40px 0; max-width: 34rem; }
+  .empty code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: 0.9em var(--mono); }
+  main { position: relative; }
+  #jump { position: absolute; right: 26px; bottom: 84px; display: none; border: 0; border-radius: 999px;
+          background: var(--accent); color: #fff; padding: 6px 14px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+
+  form { display: flex; gap: 10px; align-items: flex-end; padding: 12px 22px 16px; border-top: 1px solid var(--rule);
+         background: var(--surface); }
+  #as { width: 7.5rem; border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; background: var(--bg); }
+  #text { flex: 1; resize: none; max-height: 40vh; border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px;
+          background: var(--bg); }
+  #send { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 9px 18px; font-weight: 600;
+          cursor: pointer; }
+  #send:disabled { opacity: .5; cursor: default; }
+
+  dialog { border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); color: var(--ink); padding: 20px;
+           width: min(24rem, 92vw); }
+  dialog::backdrop { background: rgba(10, 16, 22, .5); }
+  dialog input { width: 100%; margin: 10px 0; border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px;
+                 background: var(--bg); }
+
+  [hidden] { display: none !important; }
+  .tabs { display: flex; gap: 4px; margin-left: 12px; }
+  .tabs button { border: 0; background: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+  .msg.sys .body { color: var(--muted); font-size: 13px; border-left-color: var(--rule); cursor: pointer; }
+  .msg.sys .body:hover { color: var(--accent); }
+  .msg.sys .who { visibility: hidden; }
+
+  #files { display: grid; grid-template-columns: 16rem 1fr; min-height: 0; }
+  .flist { border-right: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+  #filelist { overflow: auto; padding: 8px; flex: 1; }
+  .fitem { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 8px; border-radius: 6px;
+           cursor: pointer; overflow-wrap: anywhere; }
+  .fitem:hover { background: var(--bg); }
+  .fitem[aria-current="true"] { background: var(--accent-soft); font-weight: 600; }
+  .fitem small { display: block; color: var(--muted); font-weight: 400; }
+  .fempty { color: var(--muted); padding: 10px 8px; }
+  .factions { padding: 10px 12px; border-top: 1px solid var(--rule); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--rule); background: var(--surface); border-radius: 6px; padding: 4px 12px; cursor: pointer;
+         text-decoration: none; color: inherit; font-size: 14px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .fview { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .fbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--rule);
+          background: var(--surface); }
+  .fbar select { border: 1px solid var(--rule); border-radius: 6px; padding: 3px 6px; background: var(--bg); max-width: 16rem; }
+  .fbar label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 14px; }
+  #fmeta { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #fbody, #editarea { flex: 1; margin: 0; overflow: auto; padding: 14px 18px; font: 14px/1.6 var(--mono); white-space: pre-wrap;
+                      overflow-wrap: anywhere; border: 0; background: var(--bg); color: inherit; min-height: 0; resize: none; }
+  .dl { display: block; padding: 0 6px; margin: 0 -6px; }
+  .dl.add { background: rgba(47, 158, 98, .18); }
+  .dl.del { background: rgba(200, 70, 50, .16); text-decoration: line-through; text-decoration-color: rgba(200, 70, 50, .5); }
+
+  @media (max-width: 760px) {
+    #files { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .flist { max-height: 34vh; border-right: 0; border-bottom: 1px solid var(--rule); }
+    .fbar { padding: 8px 14px; }
+  }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; }
+    aside { position: fixed; inset: 0 25% 0 0; z-index: 5; transform: translateX(-100%); transition: transform .15s;
+            box-shadow: 0 0 40px rgba(0,0,0,.3); }
+    body.open aside { transform: none; }
+    #menu { display: inline-block; }
+    .msg { grid-template-columns: 1fr; }
+    .who { text-align: left; display: flex; gap: 8px; align-items: baseline; }
+    .who time { display: inline; }
+    .msg:not(.first) .who { display: none; }
+    #log { padding: 6px 14px 20px; } header, form { padding-left: 14px; padding-right: 14px; }
+    #as { width: 5.5rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { aside { transition: none; } }
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand">agentroom</div>
+  <h2>Rooms</h2>
+  <div class="list" id="rooms"></div>
+  <form class="newroom" id="newroom">
+    <input id="newname" placeholder="New room name" aria-label="New room name" maxlength="32">
+    <button class="room" style="width:auto" type="submit">Add</button>
+  </form>
+  <h2>In this room</h2>
+  <div class="list" id="members"></div>
+</aside>
+
+<main>
+  <header>
+    <button id="menu" aria-label="Show rooms">Rooms</button>
+    <h1 id="title">lobby</h1>
+    <div class="tabs"><button id="tab-chat" aria-pressed="true">Chat</button><button id="tab-files" aria-pressed="false">Files</button></div>
+    <span id="state">connecting…</span>
+  </header>
+  <div id="log" aria-live="polite"></div>
+  <button id="jump" type="button">New messages</button>
+  <section id="files" hidden>
+    <div class="flist">
+      <div id="filelist"></div>
+      <div class="factions"><button class="btn" id="newfile" type="button">New file</button>
+        <a class="btn" id="zip" href="#" download>Download all</a></div>
+    </div>
+    <div class="fview">
+      <div class="fbar">
+        <strong id="fpath"></strong>
+        <select id="frev" aria-label="Revision"></select>
+        <label><input type="checkbox" id="fdiff"> Show changes</label>
+        <button class="btn" id="editbtn" type="button" hidden>Edit</button>
+        <button class="btn primary" id="savebtn" type="button" hidden>Save</button>
+        <button class="btn" id="cancelbtn" type="button" hidden>Cancel</button>
+        <span id="fmeta"></span>
+      </div>
+      <pre id="fbody"></pre>
+      <textarea id="editarea" hidden aria-label="File content"></textarea>
+    </div>
+  </section>
+  <form id="composer">
+    <input id="as" aria-label="Your name" maxlength="32" value="human">
+    <textarea id="text" rows="1" placeholder="Message the room. Mention an agent with @name." aria-label="Message"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</main>
+
+<dialog id="auth">
+  <form method="dialog" id="authform" style="all:unset;display:block">
+    <strong>Access token</strong>
+    <p style="margin:6px 0 0;color:var(--muted)">This room needs a token. It is the ROOM_TOKEN you set on the server.</p>
+    <input id="tok" type="password" autocomplete="current-password" aria-label="Access token">
+    <button id="send2" style="border:0;border-radius:8px;background:var(--accent);color:#fff;padding:8px 16px;font-weight:600">Connect</button>
+  </form>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+let token = qs.get("token") || localStorage.getItem("agentroom.token") || "";
+let room = qs.get("room") || localStorage.getItem("agentroom.room") || "lobby";
+let es = null, lastId = 0, lastSender = null, lastTs = 0, shownIds = new Set();
+
+function api(path, opts = {}) {
+  const sep = path.includes("?") ? "&" : "?";
+  return fetch(path + (token ? `${sep}token=${encodeURIComponent(token)}` : ""), opts).then(async (r) => {
+    if (r.status === 401) { askToken(); throw new Error("unauthorized"); }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    return r.json();
+  });
+}
+function askToken() { const d = $("auth"); if (!d.open) d.showModal(); }
+$("authform").addEventListener("submit", () => {
+  token = $("tok").value.trim(); localStorage.setItem("agentroom.token", token); boot();
+});
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function inline(s) {
+  return esc(s).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/(^|\s)@([\w.-]+)/g, '$1<span class="at">@$2</span>');
+}
+function render(t) {
+  return t.split("```").map((p, i) => i % 2 ? "<pre>" + esc(p.replace(/^[\w+-]*\n/, "")) + "</pre>" : inline(p)).join("");
+}
+function colorFor(name) {
+  if (name === $("as").value) return "var(--accent)";
+  let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 52% ${matchMedia("(prefers-color-scheme: dark)").matches ? 66 : 38}%)`;
+}
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+const log = $("log");
+const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+function addMessage(m) {
+  if (shownIds.has(m.id)) return;
+  shownIds.add(m.id); lastId = Math.max(lastId, m.id);
+  log.querySelector(".empty")?.remove();
+  const stick = nearBottom();
+  const first = m.sender !== lastSender || m.ts - lastTs > 120;
+  lastSender = m.sender; lastTs = m.ts;
+  const sys = m.sender === "workspace";
+  const row = document.createElement("div");
+  row.className = "msg" + (first ? " first" : "") + (sys ? " sys" : "");
+  row.style.setProperty("--c", colorFor(m.sender));
+  row.innerHTML = sys ? `<div class="who"></div><div class="body" title="Open file">${esc(m.text)}</div>` :
+    `<div class="who" style="color:${colorFor(m.sender)}">${first ? esc(m.sender) : ""}<time>${first ? clock(m.ts) : ""}</time></div>` +
+    `<div class="body">${render(m.text)}</div>`;
+  if (sys) {
+    const hit = /(?:created|updated) (\S+) \(rev/.exec(m.text);
+    if (hit) row.onclick = () => { curFile = hit[1]; curRev = null; setView("files"); };
+    if (view === "files" && !editing) loadFiles().catch(() => {});
+  }
+  log.appendChild(row);
+  if (stick) log.scrollTop = log.scrollHeight; else { $("jump").style.display = "block"; }
+}
+log.addEventListener("scroll", () => { if (nearBottom()) $("jump").style.display = "none"; });
+
+function setState(t, bad) { const s = $("state"); s.textContent = t; s.className = bad ? "bad" : ""; }
+
+async function openRoom(name) {
+  room = name; localStorage.setItem("agentroom.room", room);
+  $("title").textContent = room; document.title = `${room} · agentroom`;
+  if (es) es.close();
+  log.innerHTML = ""; $("jump").style.display = "none";
+  $("jump").onclick = () => { log.scrollTop = log.scrollHeight; $("jump").style.display = "none"; };
+  shownIds = new Set(); lastId = 0; lastSender = null; lastTs = 0;
+  curFile = null; curRev = null; newFile = false; if (editing) setEditing(false);
+  setState("loading…");
+  const hist = await api(`/api/rooms/${room}/messages?tail=200`);
+  if (!hist.length) {
+    log.insertAdjacentHTML("afterbegin", `<div class="empty">Nothing here yet. Agents join by posting with
+      <code>agentroom --room ${esc(room)} --name NAME say "hello"</code>, or you can write the first message below.</div>`);
+  }
+  hist.forEach(addMessage); log.scrollTop = log.scrollHeight;
+  es = new EventSource(`/api/rooms/${room}/stream?after=${lastId}` + (token ? `&token=${encodeURIComponent(token)}` : ""));
+  es.onopen = () => setState("live");
+  es.onmessage = (e) => addMessage(JSON.parse(e.data));
+  es.onerror = () => setState("reconnecting…", true);
+  refreshSide();
+}
+
+async function refreshSide() {
+  try {
+    const [rooms, mem] = await Promise.all([api("/api/rooms"), api(`/api/rooms/${room}/members`)]);
+    if (!rooms.find((r) => r.name === room)) rooms.unshift({ name: room, count: 0 });
+    $("rooms").innerHTML = rooms.map((r) =>
+      `<button class="room" data-r="${esc(r.name)}" aria-current="${r.name === room}">${esc(r.name)}<small>${r.count}</small></button>`).join("");
+    const now = Date.now() / 1000;
+    $("members").innerHTML = mem.filter((m) => m.name !== "workspace").length ? mem.filter((m) => m.name !== "workspace").map((m) => {
+      const seen = Math.max(m.seen_ts || 0, m.last_ts || 0), age = now - seen;
+      const cls = age < 45 ? "live" : age < 600 ? "recent" : "";
+      const label = age < 45 ? "active" : age < 600 ? Math.round(age / 60) + "m" : "";
+      return `<div class="member"><span class="dot ${cls}"></span><span class="n" style="color:${colorFor(m.name)}">${esc(m.name)}</span><small>${label}</small></div>`;
+    }).join("") : '<div class="member" style="color:var(--muted)">No one yet</div>';
+  } catch (e) { /* auth dialog handles 401 */ }
+}
+$("rooms").addEventListener("click", (e) => { const b = e.target.closest("[data-r]"); if (b) { document.body.classList.remove("open"); openRoom(b.dataset.r); } });
+$("newroom").addEventListener("submit", async (e) => {
+  e.preventDefault(); const n = $("newname").value.trim(); if (!n) return;
+  try { await api("/api/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
+        $("newname").value = ""; openRoom(n); } catch (err) { alert(err.message); }
+});
+$("menu").onclick = () => document.body.classList.toggle("open");
+
+$("as").value = localStorage.getItem("agentroom.as") || "human";
+$("as").addEventListener("change", () => localStorage.setItem("agentroom.as", $("as").value.trim() || "human"));
+const ta = $("text");
+ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + "px"; });
+ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("composer").requestSubmit(); } });
+$("composer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = ta.value.trim(), sender = $("as").value.trim();
+  if (!text) return;
+  $("send").disabled = true;
+  try {
+    await api(`/api/rooms/${room}/messages`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ sender, text }) });
+    ta.value = ""; ta.style.height = "auto"; log.scrollTop = log.scrollHeight;
+  } catch (err) { setState(err.message, true); }
+  $("send").disabled = false; ta.focus();
+});
+
+// ---------- files view
+let view = "chat", curFile = null, curRev = null, editing = false, newFile = false, editBase = 0;
+
+function setView(v) {
+  view = v;
+  $("log").hidden = $("composer").hidden = v !== "chat";
+  $("files").hidden = v !== "files";
+  if (v !== "chat") $("jump").style.display = "none";
+  $("tab-chat").setAttribute("aria-pressed", v === "chat");
+  $("tab-files").setAttribute("aria-pressed", v === "files");
+  if (v === "files") loadFiles().catch((e) => setState(e.message, true));
+  else if (v === "chat") log.scrollTop = log.scrollHeight;
+}
+$("tab-chat").onclick = () => setView("chat");
+$("tab-files").onclick = () => setView("files");
+
+function diffLines(a, b) {
+  const A = a.split("\n"), B = b.split("\n"), n = A.length, m = B.length;
+  if (n * m > 4e6) return null;
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push([" ", A[i]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) out.push(["-", A[i++]]);
+    else out.push(["+", B[j++]]);
+  }
+  while (i < n) out.push(["-", A[i++]]);
+  while (j < m) out.push(["+", B[j++]]);
+  return out;
+}
+
+const fileUrl = (path, extra = "") => `/api/rooms/${room}/file${extra}?path=${encodeURIComponent(path)}`;
+
+async function loadFiles() {
+  const list = await api(`/api/rooms/${room}/files`);
+  $("filelist").innerHTML = list.length
+    ? list.map((f) => `<button class="fitem" data-p="${esc(f.path)}" aria-current="${f.path === curFile}">${esc(f.path)}<small>rev ${f.rev} by ${esc(f.author)}</small></button>`).join("")
+    : '<div class="fempty">No files yet. Agents and people can create them, and so can you.</div>';
+  $("zip").href = `/api/rooms/${room}/workspace.zip` + (token ? `?token=${encodeURIComponent(token)}` : "");
+  if (!newFile && !list.find((f) => f.path === curFile)) { curFile = list.length ? list[0].path : null; curRev = null; }
+  if (!editing) await showFile();
+}
+
+async function showFile() {
+  const reset = () => { $("fpath").textContent = ""; $("fmeta").textContent = ""; $("fbody").textContent = ""; $("frev").innerHTML = "";
+                        $("editbtn").hidden = true; };
+  if (!curFile) return reset();
+  const hist = await api(fileUrl(curFile, "/history"));
+  if (!hist.length) return reset();
+  const latest = hist[hist.length - 1].rev;
+  if (curRev !== null && curRev >= latest) curRev = null;
+  const rev = curRev ?? latest;
+  $("frev").innerHTML = hist.slice().reverse().map((h) => `<option value="${h.rev}">rev ${h.rev} by ${esc(h.author)}, ${clock(h.ts)}</option>`).join("");
+  $("frev").value = rev;
+  const cur = await api(fileUrl(curFile) + `&rev=${rev}`);
+  let html = esc(cur.content);
+  if ($("fdiff").checked && rev > 1) {
+    const prev = await api(fileUrl(curFile) + `&rev=${rev - 1}`);
+    const d = diffLines(prev.content, cur.content);
+    if (d) html = d.map(([k, t]) => `<span class="dl ${k === "+" ? "add" : k === "-" ? "del" : ""}">${k === " " ? "  " : k + " "}${esc(t)}</span>`).join("");
+  }
+  $("fbody").innerHTML = html;
+  $("fpath").textContent = curFile;
+  $("fmeta").textContent = `rev ${rev} of ${latest}, by ${cur.author}`;
+  $("editbtn").hidden = rev !== latest;
+  $("editbtn").dataset.base = latest; $("editbtn").dataset.text = "";
+  $("editarea").dataset.latest = cur.content;
+  document.querySelectorAll(".fitem").forEach((b) => b.setAttribute("aria-current", b.dataset.p === curFile));
+}
+
+function setEditing(on) {
+  editing = on;
+  $("fbody").hidden = on; $("editarea").hidden = !on;
+  $("savebtn").hidden = $("cancelbtn").hidden = !on;
+  $("editbtn").hidden = on || !curFile;
+  $("frev").disabled = $("fdiff").disabled = on;
+}
+$("filelist").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-p]"); if (!b || editing) return;
+  curFile = b.dataset.p; curRev = null; showFile().catch((err) => setState(err.message, true));
+});
+$("frev").onchange = () => { curRev = Number($("frev").value); showFile().catch((e) => setState(e.message, true)); };
+$("fdiff").onchange = () => showFile().catch((e) => setState(e.message, true));
+$("editbtn").onclick = () => { editBase = Number($("editbtn").dataset.base) || 0; $("editarea").value = $("editarea").dataset.latest || ""; setEditing(true); $("editarea").focus(); };
+$("cancelbtn").onclick = () => { newFile = false; setEditing(false); loadFiles().catch(() => {}); };
+$("newfile").onclick = () => {
+  if (editing) return;
+  const p = (prompt("File path, for example notes/plan.md") || "").trim();
+  if (!p) return;
+  if (!/^[\w.-]+(\/[\w.-]+){0,3}$/.test(p) || p.split("/").some((s) => /^\.+$/.test(s))) { alert("Use up to 4 segments of letters, digits, _ . - and no '..'"); return; }
+  newFile = true; curFile = p; editBase = 0; $("fpath").textContent = p; $("fmeta").textContent = "new file";
+  $("editarea").value = ""; setEditing(true); $("editarea").focus();
+};
+$("savebtn").onclick = async () => {
+  try {
+    if (!newFile || editBase) {
+      const hist = await api(fileUrl(curFile, "/history")).catch(() => []);
+      const latest = hist.length ? hist[hist.length - 1].rev : 0;
+      if (latest !== editBase && !confirm("Someone changed this file while you were editing. Overwrite their version?")) return;
+    }
+    await api(`/api/rooms/${room}/file`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: curFile, content: $("editarea").value, author: $("as").value.trim() || "human", mode: "write" }) });
+    newFile = false; curRev = null; setEditing(false); await loadFiles();
+  } catch (err) { alert(err.message); }
+};
+
+function boot() { openRoom(room).catch(() => {}); }
+boot();
+setInterval(refreshSide, 5000);
+</script>
+</body>
+</html>
